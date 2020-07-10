@@ -1,0 +1,13 @@
+#
+.env
+
+#ide
+.idea
+
+/container/*/backup
+/container/*/data
+/container/*/log
+
+
+#temp
+docs

@@ -1,0 +1,165 @@
+version: '3.5'
+
+# # тут настройки env и фикс для maria db
+# x-api-environment: &x-api-environment
+#   DB_CONNECTION: ${DOCKER__MARIADB__DB_CONNECTION}
+#   DB_HOST: ${DOCKER__MARIADB__DB_HOST}
+#   DB_PORT: ${DOCKER__MARIADB__DB_PORT}
+#   DB_USERNAME: ${DOCKER__MARIADB__USER}
+#   DB_PASSWORD: ${DOCKER__MARIADB__PASSWORD}
+#   DB_DATABASE: ${DOCKER__MARIADB__DATABASE}
+#   # при необходимости подрубить еще один env файл
+#   #env_file:
+#   #  file.env
+
+# настройки синхронизации папок
+x-nginx-volumes: &x-nginx-volumes
+  - ./container/nginx/backup:/var/backup
+  # - ./container/nginx/config/nginx.conf:/etc/nginx/nginx.conf:ro
+  - ./container/nginx/config/conf.d:/etc/nginx/conf.d:ro
+  # - ./container/nginx/log:/var/log
+  - ./container/web_site_name_1/data:/var/www/web_site_name_1:ro # sync site 1
+  - ./container/web_site_name_2/data:/var/www/web_site_name_2:ro # sync site 2
+
+# database
+x-mariadb-volumes: &x-mariadb-volumes
+  - ./container/db_maria/data:/var/lib/mysql:rw
+  - ./container/db_maria/log:/var/log/mysql:rw
+  - ./container/db_maria/config/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+
+# sites
+x-web-site_name_1-volumes: &x-site_name_1-volumes
+  - ./container/web_site_name_1/data:/var/www/web_site_name_1
+  - ./container/web_site_name_1/config/php/${PHP_INI}:/usr/local/etc/php/php.ini:ro
+
+x-web-site_name_2-volumes: &x-site_name_2-volumes
+  - ./container/web_site_name_2/data:/var/www/
+  - ./container/web_site_name_2/config/php/${PHP_INI}:/usr/local/etc/php/php.ini:ro
+
+
+services:
+  # nginx
+  nginx:
+    container_name: nginx
+    image: nginx:1.19
+    links:
+      - web_site_name_1:web_site_name_1
+      - web_site_name_2:web_site_name_2
+    ports:
+      - ${DOCKER__NGINX__PORT80_EXPOSE}:80
+      - ${DOCKER__NGINX__PORT443_EXPOSE}:443
+    volumes:
+      *x-nginx-volumes
+    networks:
+      - docker-network
+
+  # database
+  # - mariaDB
+  db_maria:
+    image: mariadb:10.4-bionic
+    container_name: db_maria
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DOCKER__MARIADB__ROOT_PASSWORD}
+      MYSQL_USER: ${DOCKER__MARIADB__USER}
+      MYSQL_PASSWORD: ${DOCKER__MARIADB__PASSWORD}
+      MYSQL_DATABASE: ${DOCKER__MARIADB__DATABASE}
+    volumes:
+      *x-mariadb-volumes
+    ports:
+      - ${DOCKER__MARIADB__PORT3306_EXPOSE}:3306
+    networks:
+      docker-network:
+        aliases:
+          - db.e-forum.local
+
+  # - db_mongodb
+  # - db_postgres
+
+  # service
+  # - phpMyAdmin
+  service_phpMyAdmin:
+    container_name: service_phpMyAdmin
+    depends_on:
+      - db_maria
+    links:
+      - db_maria:db
+    image: phpmyadmin/phpmyadmin
+    restart: always
+    # порт который желательно не светить в наружу для доступа к phpMyAdmin
+#    ports:
+#      - '33067:80'
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: ${DOCKER__MARIADB__ROOT_PASSWORD}
+    networks:
+      - docker-network
+
+  # phpPgAdmin
+
+  # web
+  web_site_name_1:
+    container_name: web_site_name_1
+    build:
+      context: ./src/dockerfiles
+      dockerfile: php7.4-fpm.dockerfile
+    # image: web_site_name_1
+    #environment:
+    #  <<: *x-api-environment # поправить на явные переменные окружения
+    working_dir: /var/www/web_site_name_1/html
+    #command: >
+    #  sh -c "php artisan cache:clear && php artisan clear-compiled && composer dump-autoload && php artisan migrate"
+    volumes:
+      *x-site_name_1-volumes
+    links:
+      - db_maria:db
+    depends_on:
+      - db_maria
+    networks:
+      docker-network:
+        aliases:
+          - site_name_1
+
+  web_site_name_2:
+    container_name: web_site_name_2
+    build:
+      context: ./src/dockerfiles
+      dockerfile: php7.4-fpm.dockerfile
+    # image: web_site_name_2
+    #environment:
+    #  <<: *x-api-environment # поправить на явные переменные окружения
+    working_dir: /var/www/web_site_name_2/html
+    #command: >
+    #  sh -c "php artisan cache:clear && php artisan clear-compiled && composer dump-autoload && php artisan migrate"
+    volumes:
+      *x-site_name_2-volumes
+    links:
+      - db_maria:db
+    depends_on:
+      - db_maria
+    networks:
+      docker-network:
+        aliases:
+          - site_name_2
+
+
+
+
+  #node:
+  #  image: node:14-alpine3.10
+  #  user: "node"
+  #  working_dir: /home/node/app
+  #  environment:
+  #    - NODE_ENV=production
+  #  volumes:
+  #    - ${SRC_PATH}:/home/node/app
+  #  expose:
+  #    - "8081"
+  #  command: sh -c "npm install &&
+  #                  npm run dev"
+
+
+#Docker Networks
+networks:
+  docker-network:
+    driver: bridge
